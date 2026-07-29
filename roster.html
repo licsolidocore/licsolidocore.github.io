@@ -526,48 +526,58 @@
     let section = "existing"; // "first" | "intro" | "existing"
     let last = null; // the most recently added client, so alerts attach to them
 
-    function looksLikeAlert(s) {
-      // Prose sentence: has spaces and lowercase words, isn't a stat/location line
-      if (isStatLine.test(s) || isLocation.test(s)) return false;
-      if (nameWithCount.test(s)) return false;
+    // Lines that are clearly NOT alerts (client stats, membership, location, platform)
+    const notAlert = /^(Last Class|Next Class|Next class|\d+\s+visit|Committed|Monthly|MSTH|BF |New Client|Show Alert|Traveling|Expiring|Member\b)/i;
+
+    function looksLikeAlert(s, nextLine) {
+      if (notAlert.test(s)) return false;
+      if (isLocation.test(s)) return false;
+      if (nameWithCount.test(s)) return false;                 // "Katherine De La Cadena 81"
+      // A bare name line whose NEXT line is a count is the next client, not an alert
+      if (nameOnly.test(s) && /^\d{1,4}$/.test(nextLine || "")) return false;
+      // A bare name line followed by membership/location is the next client too
+      if (nameOnly.test(s) && /^(Committed|Monthly|MSTH|BF |New Client|Member|ClassPass|Wellhub)/i.test(nextLine || "")) return false;
       const words = s.split(/\s+/);
-      return words.length >= 4 && /[a-z]/.test(s);
+      return words.length >= 5 && /[a-z]/.test(s);              // real coach notes are sentences
     }
 
     for (let i = 0; i < lines.length; i++) {
-      let t = lines[i].replace(/^[\u2139\u26a0\ufe0f\u2b50\u2605i\s*]+/, "").trim(); // strip leading icons
+      let t = lines[i].replace(/^[\u2139\u26a0\ufe0f\u2b50\u2605\ud83d\udd14i\s*]+/, "").trim(); // strip leading icons
       if (!t) continue;
 
       if (/^First Timers\b/i.test(t)) { section = "first"; last = null; continue; }
       if (/^New Clients\b/i.test(t)) { section = "intro"; last = null; continue; }
       if (/^Existing Clients\b/i.test(t)) { section = "existing"; last = null; continue; }
 
-      // Educate badge → attach to current client
-      const edu = t.match(/^(Educate on .+)$/i);
-      if (edu && last) { last.badge = edu[1].trim(); continue; }
-
-      // Coach note / alert prose → attach to current client
-      if (last && looksLikeAlert(t)) {
-        last.alert = last.alert ? (last.alert + " " + t) : t;
-        continue;
-      }
-
+      // Client line?
       let name = null, count = null;
       const m = t.match(nameWithCount);
       if (m) {
         name = m[1].trim(); count = parseInt(m[2], 10);
       } else if (nameOnly.test(t) && i + 1 < lines.length && /^\d{1,4}$/.test(lines[i + 1])) {
         name = t; count = parseInt(lines[i + 1], 10); i++;
-      } else if (section === "first" && nameOnly.test(t) && !skip.test(t)) {
+      } else if (section === "first" && nameOnly.test(t) && !skip.test(t) && !looksLikeAlert(t, lines[i + 1])) {
         name = t; count = 0;
       }
-      if (!name || skip.test(name)) continue;
-      const key = name.toLowerCase();
-      if (seen.has(key)) { last = null; continue; } // CRM lists each client twice
-      seen.add(key);
-      const person = { name, count, first: section === "first", intro: section === "intro" };
-      out.push(person);
-      last = person; // subsequent alert lines attach here
+
+      if (name && !skip.test(name)) {
+        const key = name.toLowerCase();
+        if (seen.has(key)) { last = null; continue; } // CRM lists each client twice
+        seen.add(key);
+        const person = { name, count, first: section === "first", intro: section === "intro" };
+        out.push(person);
+        last = person;
+        continue;
+      }
+
+      // Educate badge → attach to current client
+      const edu = t.match(/^(Educate on .+)$/i);
+      if (edu && last) { last.badge = edu[1].trim(); continue; }
+
+      // Real coach note → attach to current client
+      if (last && looksLikeAlert(t, lines[i + 1])) {
+        last.alert = last.alert ? (last.alert + " " + t) : t;
+      }
     }
     return out;
   }
