@@ -195,6 +195,9 @@
   .chip.injury { border-color: #ff8a8a; box-shadow: 0 0 0 2px rgba(255,138,138,.35); }
   .bed .name.injury { background: #ffb3b3; color: #4a0d0d; }
 
+  .chip .bell { margin-left: 5px; font-size: .9em; }
+  .bed .name .bell { margin-left: 4px; font-size: .8em; }
+
   /* Coach View: big names for reading at a glance mid-class */
   body.coachmode .pool { display: none; }
   body.coachmode .room { max-width: 760px; }
@@ -504,31 +507,67 @@
   }
 
   function extractRoster(text) {
-    // Handles both pasted page text ("Name 123" on one line) and raw HTML
-    // from the proxy, where the name and number often land on separate lines.
+    // Handles pasted page text and raw HTML from the proxy.
+    // Sections: "First Timers" (no class number, truly new), "New Clients"
+    // (intro offer), "Existing Clients". Names may include parenthetical nicknames.
+    // Also captures per-client alerts: "Educate on..." badges and the coach
+    // notes revealed by "Show Alert" (milestone celebrations, behavior heads-ups).
     const clean = text.replace(/<[^>]+>/g, "\n").replace(/&amp;/g, "&").replace(/&nbsp;/g, " ");
     const lines = clean.split(/\n+/).map(t => t.trim()).filter(Boolean);
     const seen = new Set();
     const out = [];
-    const skip = /Last Class|Next Class|visits|Client|Unlimited|Membership|class pack|Committed|Employee|Monthly|Group Classes|New York|Brooklyn|Astoria|Long Island|Queens|Jersey/i;
-    const nameOnly = /^[A-Z][A-Za-z'.\-]+(?:[ \t]+[A-Z][A-Za-z'.\-]+){1,3}$/;
-    let inNewSection = false;
+    const skip = /Last Class|Next Class|visits|Client|Unlimited|Membership|class pack|Committed|Employee|Monthly|Group Classes|ClassPass|Wellhub|New York|Brooklyn|Astoria|Long Island|Queens|Jersey|Rego Park|Forest Hills|Middle Village|NoLita|Sunnyside/i;
+    const NAME = "[A-Z][A-Za-z'.()\\-]*(?:\\s+[A-Za-z'.()\\-][A-Za-z'.()\\-]*){1,4}";
+    const nameWithCount = new RegExp("^(" + NAME + ")\\s+(\\d{1,4})$");
+    const nameOnly = new RegExp("^" + NAME + "$", "i");
+    const isStatLine = /^(Last Class|Next Class|Next class|\d+\s+visit|Committed|Monthly|MSTH|BF |New Client|Show Alert|[a-z].*,\s*(NY|null)$)/i;
+    const isLocation = /,\s*(NY|NJ|CT|null)$/i;
+
+    let section = "existing"; // "first" | "intro" | "existing"
+    let last = null; // the most recently added client, so alerts attach to them
+
+    function looksLikeAlert(s) {
+      // Prose sentence: has spaces and lowercase words, isn't a stat/location line
+      if (isStatLine.test(s) || isLocation.test(s)) return false;
+      if (nameWithCount.test(s)) return false;
+      const words = s.split(/\s+/);
+      return words.length >= 4 && /[a-z]/.test(s);
+    }
+
     for (let i = 0; i < lines.length; i++) {
-      const t = lines[i];
-      if (/New Clients/i.test(t)) { inNewSection = true; continue; }
-      if (/Existing Clients/i.test(t)) { inNewSection = false; continue; }
+      let t = lines[i].replace(/^[\u2139\u26a0\ufe0f\u2b50\u2605i\s*]+/, "").trim(); // strip leading icons
+      if (!t) continue;
+
+      if (/^First Timers\b/i.test(t)) { section = "first"; last = null; continue; }
+      if (/^New Clients\b/i.test(t)) { section = "intro"; last = null; continue; }
+      if (/^Existing Clients\b/i.test(t)) { section = "existing"; last = null; continue; }
+
+      // Educate badge → attach to current client
+      const edu = t.match(/^(Educate on .+)$/i);
+      if (edu && last) { last.badge = edu[1].trim(); continue; }
+
+      // Coach note / alert prose → attach to current client
+      if (last && looksLikeAlert(t)) {
+        last.alert = last.alert ? (last.alert + " " + t) : t;
+        continue;
+      }
+
       let name = null, count = null;
-      const m = t.match(/^([A-Z][A-Za-z'.\-]+(?:[ \t]+[A-Z][A-Za-z'.\-]+){1,3})[ \t]+(\d{1,4})$/);
+      const m = t.match(nameWithCount);
       if (m) {
         name = m[1].trim(); count = parseInt(m[2], 10);
       } else if (nameOnly.test(t) && i + 1 < lines.length && /^\d{1,4}$/.test(lines[i + 1])) {
         name = t; count = parseInt(lines[i + 1], 10); i++;
+      } else if (section === "first" && nameOnly.test(t) && !skip.test(t)) {
+        name = t; count = 0;
       }
       if (!name || skip.test(name)) continue;
       const key = name.toLowerCase();
-      if (seen.has(key)) continue; // CRM page lists each client twice
+      if (seen.has(key)) { last = null; continue; } // CRM lists each client twice
       seen.add(key);
-      out.push({ name, count, intro: inNewSection });
+      const person = { name, count, first: section === "first", intro: section === "intro" };
+      out.push(person);
+      last = person; // subsequent alert lines attach here
     }
     return out;
   }
@@ -541,7 +580,7 @@
     let added = 0;
     entries.forEach(e => {
       if (existing.has(e.name.toLowerCase())) return;
-      cur().pool.push({ id: "p" + (uid++), name: e.name, count: e.count ?? null, first: !!e.first, intro: !!e.intro });
+      cur().pool.push({ id: "p" + (uid++), name: e.name, count: e.count ?? null, first: !!e.first, intro: !!e.intro, alert: e.alert || "", badge: e.badge || "" });
       added++;
     });
     render();
@@ -807,6 +846,9 @@
     everyone.forEach(p => {
       if (p.injury) rows.push("\ud83e\ude79 " + escapeHtml(displayName(p)) + ", keep an eye out today");
     });
+    everyone.forEach(p => {
+      if (p.alert) rows.push("\ud83d\udd14 " + escapeHtml(displayName(p)) + ": " + escapeHtml(p.alert));
+    });
     if (!rows.length) { banner.hidden = true; banner.innerHTML = ""; return; }
     banner.hidden = false;
     banner.innerHTML = '<div class="mtitle">Big moments in this class</div>' +
@@ -834,6 +876,13 @@
         c.appendChild(cnt);
       }
       if (p.note) delete p.note; // legacy field from earlier version
+      if (p.alert || p.badge) {
+        const bell = document.createElement("span");
+        bell.className = "bell";
+        bell.textContent = "\ud83d\udd14";
+        bell.title = [p.badge, p.alert].filter(Boolean).join(" — ");
+        c.appendChild(bell);
+      }
       c.addEventListener("dblclick", e => { e.stopPropagation(); toggleInjury(p); });
       c.draggable = true;
       c.tabIndex = 0;
@@ -858,6 +907,12 @@
           cnt.className = "cnt";
           cnt.textContent = note;
           n.appendChild(cnt);
+        }
+        if (person.alert || person.badge) {
+          const bell = document.createElement("span");
+          bell.className = "bell";
+          bell.textContent = "\ud83d\udd14";
+          n.appendChild(bell);
         }
         bed.appendChild(n);
       }
