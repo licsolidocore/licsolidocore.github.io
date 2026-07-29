@@ -607,49 +607,107 @@
     return added;
   }
 
+  // Fetch a URL's HTML through the proxy (fast) or a direct request (fallback).
+  async function fetchPageHtml(url) {
+    if (PROXY_URL && !PROXY_URL.startsWith("PASTE_")) {
+      try {
+        const res = await fetch(PROXY_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+        if (res.ok && data.html) return data.html;
+      } catch (e) { /* fall through */ }
+    }
+    try {
+      const res = await fetch(url);
+      if (res.ok) return await res.text();
+    } catch (e) { /* fall through */ }
+    return null;
+  }
+
+  // Find class links on a landing page. Returns [{url, label}] or [] if none.
+  function findClassLinks(html, baseUrl) {
+    const links = [];
+    const seen = new Set();
+    const re = /href=["']([^"']*sldcr\.co\/[A-Za-z0-9\-]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+      let href = m[1];
+      if (href.startsWith("/")) href = "https://sldcr.co" + href;
+      // Skip self-links and non-class links (class links look like rQwe..., not c100...)
+      if (href === baseUrl) continue;
+      if (/sldcr\.co\/c\d/.test(href)) continue; // that's a landing-page id, not a class
+      const label = m[2].replace(/<[^>]+>/g, " ").replace(/keyboard_arrow_right/gi, "").replace(/\s+/g, " ").trim();
+      if (seen.has(href)) continue;
+      seen.add(href);
+      links.push({ url: href, label });
+    }
+    return links;
+  }
+
+  async function importOneInto(classObj, html) {
+    const roster = extractRoster(html);
+    if (!roster.length) return 0;
+    classObj.meta = extractMeta(html) || classObj.meta;
+    // add roster into this specific class board
+    const existing = new Set([...classObj.pool, ...Object.values(classObj.assignments)].map(p => p.name.toLowerCase()));
+    let added = 0;
+    roster.forEach(e => {
+      if (existing.has(e.name.toLowerCase())) return;
+      classObj.pool.push({ id: "p" + (uid++), name: e.name, count: e.count ?? null, first: !!e.first, intro: !!e.intro, alert: e.alert || "", badge: e.badge || "" });
+      added++;
+    });
+    return added;
+  }
+
   async function importFromUrl() {
     const url = document.getElementById("rosterUrl").value.trim();
     if (!url) { toast("Paste the CRM link first"); return; }
     const btn = document.getElementById("importBtn");
     btn.disabled = true; btn.textContent = "Importing...";
     try {
-      // Attempt 1: Supabase proxy (fast, works around CORS)
-      if (PROXY_URL && !PROXY_URL.startsWith("PASTE_")) {
-        try {
-          const res = await fetch(PROXY_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url })
-          });
-          const data = await res.json();
-          if (res.ok && data.html) {
-            const roster = extractRoster(data.html);
-            if (roster.length) {
-              cur().meta = extractMeta(data.html) || cur().meta;
-              bumpFactTurn();
-              toast(addRoster(roster) + " clients imported");
-              return;
-            }
-          }
-        } catch (e) { /* proxy unreachable; fall through */ }
+      const html = await fetchPageHtml(url);
+      if (!html) {
+        toast("Couldn't read that link. Copy the page text and paste it below instead");
+        return;
       }
 
-      // Attempt 2: direct fetch (works if CRM ever allows CORS)
-      try {
-        const res = await fetch(url);
-        if (res.ok) {
-          const html = await res.text();
-          const roster = extractRoster(html);
-          if (roster.length) {
-            cur().meta = extractMeta(html) || cur().meta;
-            bumpFactTurn();
-            toast(addRoster(roster) + " clients imported");
-            return;
-          }
-        }
-      } catch (e) { /* blocked; fall through */ }
+      // Does this page have its own roster? If yes, it's a single class page.
+      const ownRoster = extractRoster(html);
+      if (ownRoster.length) {
+        cur().meta = extractMeta(html) || cur().meta;
+        bumpFactTurn();
+        toast(addRoster(ownRoster) + " clients imported");
+        return;
+      }
 
-      toast("Couldn't read that link. Copy the page text and paste it below instead");
+      // No roster here → maybe it's a landing page listing multiple classes.
+      const classLinks = findClassLinks(html, url);
+      if (!classLinks.length) {
+        toast("Couldn't read that link. Copy the page text and paste it below instead");
+        return;
+      }
+
+      // Fan out: one class board per link.
+      btn.textContent = "Loading " + classLinks.length + " classes...";
+      let totalClients = 0, loaded = 0;
+      for (let i = 0; i < classLinks.length; i++) {
+        // reuse the first (empty) class board, then add more as needed
+        let classObj = state.classes[i];
+        if (!classObj) { classObj = newClass(i + 1); state.classes.push(classObj); }
+        const chtml = await fetchPageHtml(classLinks[i].url);
+        if (chtml) {
+          const n = await importOneInto(classObj, chtml);
+          if (n > 0) { totalClients += n; loaded++; }
+        }
+      }
+      bumpFactTurn();
+      state.active = 0;
+      render();
+      if (loaded) toast(loaded + (loaded === 1 ? " class" : " classes") + " loaded, " + totalClients + " clients");
+      else toast("Found classes but couldn't read their rosters. Try pasting instead");
     } finally {
       btn.disabled = false; btn.textContent = "Import";
     }
