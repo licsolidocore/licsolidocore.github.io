@@ -175,6 +175,8 @@
   }
   .metabar .focus { color: var(--white); font-weight: 800; font-size: 16px; }
   .metabar .sub { color: var(--grey); font-size: 13px; }
+  .metabar .sci { color: #cdd6ff; font-size: 13px; margin-top: 8px; line-height: 1.5; font-weight: 600; }
+  body.coachmode .metabar .sci { font-size: 15px; }
 
   .milestones {
     width: 100%; max-width: 640px;
@@ -616,6 +618,7 @@
             const roster = extractRoster(data.html);
             if (roster.length) {
               cur().meta = extractMeta(data.html) || cur().meta;
+              bumpFactTurn();
               toast(addRoster(roster) + " clients imported");
               return;
             }
@@ -631,6 +634,7 @@
           const roster = extractRoster(html);
           if (roster.length) {
             cur().meta = extractMeta(html) || cur().meta;
+            bumpFactTurn();
             toast(addRoster(roster) + " clients imported");
             return;
           }
@@ -664,6 +668,7 @@
     if (/Last Class|visits in the last/i.test(raw)) {
       // Looks like a full CRM page paste; use the smart extractor
       cur().meta = extractMeta(raw) || cur().meta;
+      bumpFactTurn();
       added = addRoster(extractRoster(raw));
     } else {
       const names = parseNames(raw);
@@ -827,6 +832,187 @@
     }
   }
 
+  // Rotating facts per muscle, blending science ("know this") and quotable
+  // coach lines ("say this"), drawn from the solidcore cheat sheets.
+  // Facts advance one step each import so they stay fresh week to week.
+  const MUSCLE_FACTS = {
+    "center glute": [
+      "Center glutes (gluteus maximus) are your body's largest muscle.",
+      "The glute holds humans upright when walking, running, and jumping.",
+      "The glute max drives hip flexion and extension, nearly every forward and backward lower-body movement recruits it.",
+      "Strong glutes help prevent knee injuries, hip injuries, and even ankle sprains.",
+      "Say it: \u201cDeveloped center glutes let you stand tall and upright, they're the engine that drives you forward when you walk, run, and jump.\u201d",
+      "Say it: \u201cStrong glutes are important to move you through your everyday life with efficiency.\u201d"
+    ],
+    "outer glute": [
+      "Outer glutes (medius + minimus) move the legs laterally, away from the midline of the body.",
+      "Strong outer glutes help prevent falls and injuries when moving side to side.",
+      "Outer glutes stabilize your pelvis and keep your hips from dropping when you walk or run.",
+      "When one leg lifts to step forward, the opposite medial glute keeps your hips level.",
+      "Say it: \u201cYour outer glutes stabilize your hips when you move forward and backward, not just side to side.\u201d",
+      "Say it: \u201cStrong outer glutes let you lift heavier, work harder, and stay safer when you run, jump, hike, or play sports.\u201d"
+    ],
+    "glute": [
+      "Strong glutes power hip extension and help prevent knee, hip, and even ankle injuries.",
+      "The glutes hold humans upright when walking, running, and jumping.",
+      "Say it: \u201cStrong glutes move you through everyday life with efficiency.\u201d"
+    ],
+    "hamstring": [
+      "Hamstrings are a group of 3 muscles (biceps femoris, semitendinosus, semimembranosus) that flex the knee.",
+      "Hamstrings play a major role in running, jumping, and squatting.",
+      "Hamstrings enhance balance, so you're less likely to fall when footing changes.",
+      "Hamstrings aid injury prevention, stabilizing the knee and hips during quick changes of direction.",
+      "Hamstrings decelerate knee extension while walking and running to protect the knee.",
+      "Say it: \u201cYour hamstrings bend your knee, your quads extend it. We train hamstrings to balance a quad-dominant body and prevent injury.\u201d"
+    ],
+    "inner thigh": [
+      "Inner thighs (adductors) are a group of 5 muscles: adductor longus, brevis, magnus, gracilis, and pectineus.",
+      "Adductors move the leg closer to the midline of the body.",
+      "Adductors help with hip and knee stability, pelvic control, and coordination.",
+      "Inner thighs reduce injury risk when walking and running.",
+      "Say it: \u201cYour inner thighs stabilize your leg with each stride as you walk or run.\u201d",
+      "Say it: \u201cStrong inner thighs help prevent injury for every active person, which you all are!\u201d"
+    ],
+    "adductor": [
+      "Adductors (a group of 5) pull the leg toward the midline and support hip, knee, and pelvic stability.",
+      "Say it: \u201cStrong inner thighs help prevent injury for every active person, which you all are!\u201d"
+    ],
+    "center core": [
+      "The rectus abdominis handles spinal flexion.",
+      "The rectus abdominis helps with posture, injury prevention, and balance.",
+      "More strength in the rectus abdominis can reduce low back pain.",
+      "Say it: \u201cBuilding strength in the rectus abdominis helps you get up out of bed or off the ground, and supports your back when you lift things.\u201d"
+    ],
+    "core": [
+      "The transverse abdominis provides spinal stability and support.",
+      "The transverse abdominis stabilizes the spine during trunk movement.",
+      "The transverse abdominis draws in the abdominal wall for proper abdominal pressure.",
+      "A strong transverse abdominis can reduce low back pain and prevent fatigue after standing or walking.",
+      "Say it: \u201cA strong transverse abdominis protects your spine and prevents low back pain when completing everyday tasks on your feet.\u201d"
+    ],
+    "oblique": [
+      "Internal obliques handle rotation of the torso.",
+      "External obliques handle lateral flexion of the spine.",
+      "Strong obliques lead to better maintenance of proper posture, which protects the spine.",
+      "The trunk rotates in basic everyday movements like walking, and your external obliques protect your spine while doing so.",
+      "Say it: \u201cAnytime you twist, your internal obliques squeeze to rotate your trunk, imagine turning to grab something heavy from behind you.\u201d",
+      "Say it: \u201cWhen you carry something heavy on one side of your body, your external obliques keep your posture tall and protect your back.\u201d"
+    ],
+    "ab": [
+      "The rectus abdominis flexes the spine and supports your back when you lift.",
+      "The transverse abdominis stabilizes the spine during all trunk movement."
+    ],
+    "back": [
+      "Latissimus dorsi handles shoulder extension and back stabilization.",
+      "Lats help stabilize your back while extending your shoulders, pulling weight toward you.",
+      "Rhomboids handle shoulder and scapula stability, and retract the scapula.",
+      "Trapezius handles scapular movement plus neck and head support.",
+      "Say it: \u201cSitting at a computer all day rounds your back and caves your chest, strengthening your back corrects posture and relieves tension.\u201d",
+      "Say it: \u201cUse your traps to lift your chin off your chest and pull your shoulder blades together in this back fly.\u201d"
+    ],
+    "lat": [
+      "Latissimus dorsi handles shoulder extension and back stabilization, pulling weight toward you.",
+      "Say it: \u201cStrengthening your back leads to correct posture and relieves tension in the back and shoulders.\u201d"
+    ],
+    "rhomboid": [
+      "Rhomboids provide shoulder and scapula stability and retract the scapula.",
+      "Say it: \u201cStrong rhomboids play a vital role in pulling motions and stabilize your shoulder joint when you push overhead.\u201d"
+    ],
+    "trap": [
+      "Traps handle scapular movement plus neck and head support.",
+      "Strong traps help prevent pain from poor posture, like leaning forward with a rounded upper back at your desk.",
+      "Say it: \u201cUse your traps to lift your chin off your chest and pull your shoulder blades together in this back fly.\u201d"
+    ],
+    "chest": [
+      "Pectoralis major handles shoulder flexion, responsible for flexion and internal rotation of the shoulder.",
+      "The pecs push a load away from you and help with pushing a heavy cart, sled, or object.",
+      "Pectoralis minor stabilizes the scapula.",
+      "The pec minor works with the major and serratus anterior to create full range of motion for the scapula.",
+      "Say it: \u201cWe use our chest more than just in pushups, when you closed your car door to get to class today, your chest was responsible for that movement.\u201d"
+    ],
+    "pec": [
+      "Pectoralis major handles shoulder flexion and internal rotation, pushing loads away from you.",
+      "Say it: \u201cWhen you closed your car door to get to class today, your chest was responsible for that movement.\u201d"
+    ],
+    "bicep": [
+      "Biceps brachii handles elbow flexion, flexion bends your elbow.",
+      "You have long and short heads: standard curls target the short head, hammer curls the long head.",
+      "Biceps help with lifting, holding, and carrying heavy objects.",
+      "Biceps assist the back in pulling movements.",
+      "Say it: \u201cWhen you hold something heavy and keep your elbow bent, your biceps are doing that, like loading up all the groceries so you make it in one trip.\u201d"
+    ],
+    "tricep": [
+      "Triceps brachii handles elbow extension, extending the arm at the elbow.",
+      "Triceps help improve shoulder and elbow health by stabilizing those joints.",
+      "Strong triceps help with bone density in the arm and can help with arthritis pain.",
+      "Triceps assist the chest in pushing movements.",
+      "Say it: \u201cThink how many times a day you lengthen your arm to push, out of a chair, handing something to someone, or throwing a ball to your dog.\u201d"
+    ],
+    "shoulder": [
+      "Deltoids handle flexion, extension, adduction, abduction, and rotation of the arm.",
+      "Anterior, lateral, and rear deltoid work together to lift the arms and provide overhead strength and stability.",
+      "The rotator cuff is a group of 4 muscles (supraspinatus, subscapularis, infraspinatus, teres minor) that stabilize the shoulder joint.",
+      "The shoulder is the most mobile joint in the body, but that range makes it more unstable.",
+      "Say it: \u201cYour shoulders move your arms in all directions, it's important to strengthen your delts to keep the shoulder joint stable and safe.\u201d",
+      "Say it: \u201cStrong rotator cuff muscles support the shoulder, crucial for everyday reaching overhead or heavy lifting.\u201d"
+    ],
+    "delt": [
+      "Anterior, lateral, and rear delts work together to lift the arms and stabilize overhead movements.",
+      "Say it: \u201cIt's important to strengthen your delts to keep your shoulder joint stable and safe.\u201d"
+    ],
+    "rotator cuff": [
+      "The rotator cuff (4 muscles) stabilizes the shoulder, the most mobile and least stable joint in the body.",
+      "Say it: \u201cStrong rotator cuff muscles support the shoulder for everyday reaching overhead and heavy lifting.\u201d"
+    ],
+    "arm": [
+      "Biceps carry and pull, triceps push, together they power everyday lifting and reaching.",
+      "Say it: \u201cYour arms hold your groceries, push you out of your chair, and reach overhead, we train all of it.\u201d"
+    ]
+  };
+
+  // Broad regions so we don't show two facts for the same muscle group.
+  const MUSCLE_REGIONS = [
+    ["center glute", "outer glute", "glute"],
+    ["hamstring"],
+    ["inner thigh", "adductor"],
+    ["center core", "core", "ab"],
+    ["oblique"],
+    ["lat", "rhomboid", "trap", "back"],
+    ["pec", "chest"],
+    ["bicep"],
+    ["tricep"],
+    ["rotator cuff", "delt", "shoulder"],
+    ["arm"]
+  ];
+
+  // Rotation counter: advances once per import so facts change week to week.
+  function factTurn() {
+    let n = 0;
+    try { n = parseInt(localStorage.getItem("roster-fact-turn") || "0", 10) || 0; } catch (e) {}
+    return n;
+  }
+  function bumpFactTurn() {
+    try { localStorage.setItem("roster-fact-turn", String(factTurn() + 1)); } catch (e) {}
+  }
+
+  function scienceFor(focus) {
+    if (!focus) return "";
+    const f = focus.toLowerCase();
+    const turn = factTurn();
+    const hits = [];
+    for (const region of MUSCLE_REGIONS) {
+      for (const k of region) {
+        if (f.includes(k)) {
+          const arr = MUSCLE_FACTS[k];
+          hits.push(arr[turn % arr.length]); // rotate through this muscle's facts
+          break;
+        }
+      }
+      if (hits.length >= 2) break; // at most two lines, keep it light
+    }
+    return hits.join("<br>");
+  }
+
   function renderMetaBar() {
     const bar = document.getElementById("metaBar");
     const meta = cur().meta;
@@ -836,6 +1022,8 @@
     if (meta.focus) html += '<div class="focus">Muscle Focus: ' + escapeHtml(meta.focus) + "</div>";
     const sub = [meta.className, meta.time, meta.date].filter(Boolean).map(escapeHtml).join(" \u2022 ");
     if (sub) html += '<div class="sub">' + sub + "</div>";
+    const sci = scienceFor(meta.focus);
+    if (sci) html += '<div class="sci">\ud83d\udca1 ' + sci + "</div>";
     bar.innerHTML = html;
   }
 
