@@ -179,6 +179,12 @@
   body.coachmode .metabar .sci { font-size: 15px; }
   .metabar .phrase { color: #b8f0d0; font-size: 13px; margin-top: 8px; line-height: 1.5; font-weight: 600; font-style: italic; }
   body.coachmode .metabar .phrase { font-size: 15px; }
+  .metabar .refreshbtn {
+    margin-top: 10px; background: transparent; color: var(--grey);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 12px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .metabar .refreshbtn:hover { color: var(--white); border-color: var(--grey); }
 
   .milestones {
     width: 100%; max-width: 640px;
@@ -988,13 +994,21 @@
   ];
 
   // Rotation counter: advances once per import so facts change week to week.
+  // A separate manual offset lets the coach refresh phrases mid-prep.
   function factTurn() {
-    let n = 0;
-    try { n = parseInt(localStorage.getItem("roster-fact-turn") || "0", 10) || 0; } catch (e) {}
-    return n;
+    let n = 0, o = 0;
+    try {
+      n = parseInt(localStorage.getItem("roster-fact-turn") || "0", 10) || 0;
+      o = parseInt(localStorage.getItem("roster-fact-offset") || "0", 10) || 0;
+    } catch (e) {}
+    return n + o;
   }
   function bumpFactTurn() {
-    try { localStorage.setItem("roster-fact-turn", String(factTurn() + 1)); } catch (e) {}
+    try { localStorage.setItem("roster-fact-turn", String((parseInt(localStorage.getItem("roster-fact-turn") || "0", 10) || 0) + 1)); } catch (e) {}
+  }
+  function refreshPhrases() {
+    try { localStorage.setItem("roster-fact-offset", String((parseInt(localStorage.getItem("roster-fact-offset") || "0", 10) || 0) + 1)); } catch (e) {}
+    renderMetaBar();
   }
 
   function scienceFor(focus) {
@@ -1092,7 +1106,10 @@
     const sci = scienceFor(meta.focus);
     if (sci) html += '<div class="sci">\ud83d\udca1 ' + sci + "</div>";
     html += '<div class="phrase">\ud83d\udde3\ufe0f ' + escapeHtml(brandPhrase()) + "</div>";
+    html += '<button class="refreshbtn" id="refreshPhrasesBtn">\u21bb New phrase</button>';
     bar.innerHTML = html;
+    const rb = document.getElementById("refreshPhrasesBtn");
+    if (rb) rb.addEventListener("click", refreshPhrases);
   }
 
   function renderMilestoneBanner() {
@@ -1142,11 +1159,11 @@
         c.appendChild(cnt);
       }
       if (p.note) delete p.note; // legacy field from earlier version
-      if (p.alert || p.badge) {
+      if (p.alert) {
         const bell = document.createElement("span");
         bell.className = "bell";
         bell.textContent = "\ud83d\udd14";
-        bell.title = [p.badge, p.alert].filter(Boolean).join(" — ");
+        bell.title = p.alert;
         c.appendChild(bell);
       }
       c.addEventListener("dblclick", e => { e.stopPropagation(); toggleInjury(p); });
@@ -1174,7 +1191,7 @@
           cnt.textContent = note;
           n.appendChild(cnt);
         }
-        if (person.alert || person.badge) {
+        if (person.alert) {
           const bell = document.createElement("span");
           bell.className = "bell";
           bell.textContent = "\ud83d\udd14";
