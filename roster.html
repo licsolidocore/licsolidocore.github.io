@@ -177,6 +177,8 @@
   .metabar .sub { color: var(--grey); font-size: 13px; }
   .metabar .sci { color: #cdd6ff; font-size: 13px; margin-top: 8px; line-height: 1.5; font-weight: 600; }
   body.coachmode .metabar .sci { font-size: 15px; }
+  .metabar .phrase { color: #b8f0d0; font-size: 13px; margin-top: 8px; line-height: 1.5; font-weight: 600; font-style: italic; }
+  body.coachmode .metabar .phrase { font-size: 15px; }
 
   .milestones {
     width: 100%; max-width: 640px;
@@ -1013,6 +1015,71 @@
     return hits.join("<br>");
   }
 
+  // On-brand coaching language from the solidcore brand doc. Rotates one
+  // phrase per import, grouped by theme so you get variety across categories.
+  const BRAND_PHRASES = [
+    // Stronger For It
+    "Being here. Showing up. Putting in the work. You're stronger for all of it.",
+    "Take the break. Come back stronger for it.",
+    "Stay with it. You'll be stronger for it.",
+    "Take the modification. Come back stronger for it.",
+    "You're stronger for every shake.",
+    "You're stronger for every challenge you choose to take, no matter how small.",
+    "Every class is a chance to get stronger.",
+    "The shake, the work, the hard rep, you're stronger for all of it. And so is everything waiting for you outside that door.",
+    "Taking toes today? You're stronger for it.",
+    "Slowing down your rep? You're stronger for it.",
+    "Choosing the lighter spring? You're stronger for it.",
+    "Modifying to stay in the work longer? You're stronger for it.",
+    "Every smart choice you make in here, you're stronger for it.",
+    "What's your \u201cit\u201d today? What are you getting stronger for?",
+    "Some of you are here for you. Just you. That's enough.",
+    "Maybe you're stronger for the people who count on you.",
+    "Maybe you're stronger for the version of yourself you're still becoming.",
+    "You don't have to know your \u201cit\u201d yet. Showing up is how you find it.",
+    "Think about what you want to walk out of here with. That's your \u201cit.\u201d",
+    // Client-Centered Ownership
+    "These 50 minutes are yours.",
+    "Your journey is different from the person next to you. Focus on you.",
+    "It's a commitment to yourself.",
+    "Be proud of where you are.",
+    // Mind-Body Connection
+    "Strength is mental, not just physical.",
+    "It works on your body, and it works on your mind.",
+    "[solidcore] is training for when life gets difficult out there.",
+    "What you do in here influences how you show up out there.",
+    "Focus on the growth, not the discomfort.",
+    // Progress Over Perfection
+    "Strength is built over time. Every class adds up.",
+    "You don't need to be perfect. You just need to show up.",
+    "Mini goals turn into major goals.",
+    "Strength comes from the journey, not the finish line.",
+    "Celebrate your small strength successes.",
+    // Reframing Difficulty & Rest
+    "Modify today to amplify tomorrow.",
+    "Rest for a moment, to come back harder.",
+    "Strong enough to keep trying.",
+    // Self-Driven Challenge
+    "Be your own inspiration.",
+    "Challenge yourself to grow.",
+    "Do the work you committed to doing.",
+    "Don't wish for it, work for it.",
+    // Team language
+    "You're not alone, you're in this together.",
+    "This room is working with you right now.",
+    "You may be inspiring the person beside you.",
+    "Team rep coming up!",
+    // Lasting Strength
+    "You're building something that lasts.",
+    "Strength is earned, not given.",
+    "Strength is showing up for yourself.",
+    "You can do this."
+  ];
+
+  function brandPhrase() {
+    return BRAND_PHRASES[factTurn() % BRAND_PHRASES.length];
+  }
+
   function renderMetaBar() {
     const bar = document.getElementById("metaBar");
     const meta = cur().meta;
@@ -1024,6 +1091,7 @@
     if (sub) html += '<div class="sub">' + sub + "</div>";
     const sci = scienceFor(meta.focus);
     if (sci) html += '<div class="sci">\ud83d\udca1 ' + sci + "</div>";
+    html += '<div class="phrase">\ud83d\udde3\ufe0f ' + escapeHtml(brandPhrase()) + "</div>";
     bar.innerHTML = html;
   }
 
